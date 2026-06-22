@@ -106,23 +106,17 @@ bool contains_equal(const char *line, int len) {
 int main(void) {
     char line[MAX_LINE];
 
-    while (fgets(line, sizeof(line), stdin)) {
+    while (scanf("%255s", line) == 1) {
         int len = (int)strlen(line);
 
-        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
-            line[--len] = '\0';
-        }
-
-        if (len == 0) continue;
-
-        if (line[1] == '(') {
+        if (len > 1 && line[1] == '(') {
             if (contains_equal(line, len)) {
                 handle_func_definition(line, len);
             } else {
                 long result = eval_expr(line, 0, len);
                 printf("%ld\n", result);
             }
-        } else if (line[1] == '=') {
+        } else if (len > 1 && line[1] == '=') {
             handle_var_assignment(line, len);
         } else {
             long result = eval_expr(line, 0, len);
