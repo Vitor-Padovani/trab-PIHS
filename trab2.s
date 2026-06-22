@@ -1,219 +1,128 @@
-.file "calc.s"
+.section .rodata
+fmt_in:  .string "%255s"
+fmt_out: .string "%ld\n"
 
-    # --- SEÇÃO DE DADOS ---
-    .section .rodata
-fmt_out:
-    .string "%ld\n"
-
-    # --- SEÇÃO BSS ---
     .section .bss
-    .align 32
-line:
-    .space 256
+    # Equivalente a: char line[MAX_LINE];
+    .lcomm line, 256
 
-    # --- SEÇÃO DE TEXTO ---
-    .text
+    .section .text
+    .global main
 
-# -------------------------------------------------------------
+# ========================================================
 # long read_term(const char *line, int *pos, int end)
-# (Idêntico à Etapa 2)
-# -------------------------------------------------------------
-    .type read_term, @function
+# ========================================================
 read_term:
     pushq   %rbp
     movq    %rsp, %rbp
     
-    movl    (%rsi), %ecx
-    cmpl    %edx, %ecx
-    jge     .L_rt_not_number
-    
-    movsbl  (%rdi, %rcx, 1), %r8d
-    
-    cmpl    $48, %r8d
-    jl      .L_rt_not_number
-    cmpl    $57, %r8d
-    jg      .L_rt_not_number
-    
-    xorl    %eax, %eax
-    
-.L_rt_digit_loop:
-    cmpl    %edx, %ecx
-    jge     .L_rt_digit_end
-    
-    movsbl  (%rdi, %rcx, 1), %r8d
-    cmpl    $48, %r8d
-    jl      .L_rt_digit_end
-    cmpl    $57, %r8d
-    jg      .L_rt_digit_end
-    
-    imulq   $10, %rax, %rax
-    subl    $48, %r8d
-    movslq  %r8d, %r9
-    addq    %r9, %rax
-    incl    %ecx
-    jmp     .L_rt_digit_loop
-    
-.L_rt_digit_end:
-    movl    %ecx, (%rsi)
-    popq    %rbp
-    ret
+    # Argumentos que chegam:
+    # %rdi = line
+    # %rsi = pos (ponteiro para int)
+    # %rdx = end (tamanho da string)
 
-.L_rt_not_number:
-    incl    %ecx
-    movl    %ecx, (%rsi)
-    xorl    %eax, %eax
+    xorq    %rax, %rax          # num = 0 (resultado)
+    movslq  (%rsi), %rcx        # %rcx = *pos (carrega o valor do ponteiro pos)
+
+.L_read_term_loop:
+    cmpq    %rdx, %rcx          # if (*pos >= end)
+    jge     .L_read_term_end    # sai do loop
+
+    movzbq  (%rdi, %rcx), %r8   # %r8 = line[*pos] (carrega 1 byte)
+
+    # Verifica se '0' <= c <= '9'
+    cmpb    $'0', %r8b
+    jl      .L_read_term_end
+    cmpb    $'9', %r8b
+    jg      .L_read_term_end
+
+    # num = num * 10
+    imulq   $10, %rax
+    # c = c - '0'
+    subb    $'0', %r8b
+    # num = num + c
+    addq    %r8, %rax
+    
+    incq    %rcx                # (*pos)++
+    jmp     .L_read_term_loop
+
+.L_read_term_end:
+    movl    %ecx, (%rsi)        # Atualiza a variavel pos original (*pos = %rcx)
+    
     popq    %rbp
     ret
 
 
-# -------------------------------------------------------------
+# ========================================================
 # long eval_expr(const char *line, int start, int end)
-# %rdi = line
-# %esi = start (int)
-# %edx = end (int)
-# -------------------------------------------------------------
-    .type eval_expr, @function
+# ========================================================
 eval_expr:
     pushq   %rbp
     movq    %rsp, %rbp
+    # Aloca espaco na pilha para a variavel local 'pos' e mantem o alinhamento de 16 bytes
+    subq    $16, %rsp           
+
+    # Argumentos que chegam:
+    # %rdi = line
+    # %rsi = start
+    # %rdx = end
+
+    # int pos = start;
+    movl    %esi, -4(%rbp)      # Salva 'start' no espaco reservado para 'pos'
+
+    # Preparando chamada para read_term(line, &pos, end)
+    # %rdi ja contem 'line'
+    leaq    -4(%rbp), %rsi      # %rsi recebe o endereco de 'pos'
+    # %rdx ja contem 'end'
     
-    # Alocamos 48 bytes na pilha para manter alinhamento (múltiplo de 16)
-    # e guardar registradores callee-saved e a variável local 'pos'.
-    subq    $48, %rsp
+    call    read_term           # O retorno (num) estara em %rax
+
+    # Como eh a etapa 1, nao temos loop de soma/subtracao.
+    # Apenas retornamos o primeiro termo lido.
     
-    # Salvando os registradores que precisamos preservar
-    movq    %r12, -8(%rbp)      # result
-    movq    %r13, -16(%rbp)     # sign
-    movq    %r14, -24(%rbp)     # line pointer
-    movq    %r15, -32(%rbp)     # end
-    
-    movq    %rdi, %r14          # Guarda line em %r14
-    movl    %edx, %r15d         # Guarda end em %r15d
-    movl    %esi, -36(%rbp)     # Variavel local pos = start na pilha
-
-    xorq    %r12, %r12          # result = 0
-    movl    $1, %r13d           # sign = 1
-
-.L_eval_loop:
-    # while (pos < end)
-    movl    -36(%rbp), %eax
-    cmpl    %r15d, %eax
-    jge     .L_eval_end         # Se pos >= end, sai do loop
-
-    # long term = read_term(line, &pos, end);
-    movq    %r14, %rdi          # 1º arg: line
-    leaq    -36(%rbp), %rsi     # 2º arg: endereço de pos
-    movl    %r15d, %edx         # 3º arg: end
-    call    read_term
-
-    # result += sign * term;
-    # O term retornado por read_term está em %rax
-    movslq  %r13d, %rcx         # %rcx = sign (convertido para 64 bits)
-    imulq   %rcx, %rax          # %rax = sign * term
-    addq    %rax, %r12          # result += rax
-
-    # if (pos < end)
-    movl    -36(%rbp), %eax
-    cmpl    %r15d, %eax
-    jge     .L_eval_loop        # Volta pro while se atingiu o fim
-
-    # if (line[pos] == '+') ou '-'
-    movslq  %eax, %rcx          # índice para 64-bits
-    movsbl  (%r14, %rcx, 1), %edi # %edi = line[pos]
-
-    cmpl    $43, %edi           # é '+' ? (43 em ASCII)
-    je      .L_eval_plus
-    cmpl    $45, %edi           # é '-' ? (45 em ASCII)
-    je      .L_eval_minus
-    
-    # Se não for nenhum dos dois (ex: espaço), o read_term da 
-    # próxima iteração lidará pulando esse caractere.
-    jmp     .L_eval_loop
-
-.L_eval_plus:
-    movl    $1, %r13d           # sign = 1
-    incl    -36(%rbp)           # pos++
-    jmp     .L_eval_loop
-
-.L_eval_minus:
-    movl    $-1, %r13d          # sign = -1
-    incl    -36(%rbp)           # pos++
-    jmp     .L_eval_loop
-
-.L_eval_end:
-    movq    %r12, %rax          # Retorna result em %rax
-
-    # Restaura os registradores originais
-    movq    -8(%rbp), %r12
-    movq    -16(%rbp), %r13
-    movq    -24(%rbp), %r14
-    movq    -32(%rbp), %r15
-    
-    leave                       # Libera a pilha
+    leave                       # leave eh equivalente a: movq %rbp, %rsp; popq %rbp
     ret
 
-# -------------------------------------------------------------
-# main
-# (Idêntico à Etapa 2)
-# -------------------------------------------------------------
-    .globl main
-    .type main, @function
+
+# ========================================================
+# int main(void)
+# ========================================================
 main:
     pushq   %rbp
     movq    %rsp, %rbp
+    subq    $16, %rsp           # Alinhamento de pilha para chamadas da libc
 
 .L_main_loop:
+    # scanf("%255s", line)
+    leaq    fmt_in(%rip), %rdi
+    leaq    line(%rip), %rsi
+    xorl    %eax, %eax          # %eax = 0 (exigencia para funcoes variadicas sem floats)
+    call    scanf@PLT
+
+    # Verifica o retorno do scanf (deve ser 1)
+    cmpl    $1, %eax
+    jne     .L_main_end
+
+    # Vamos calcular o tamanho da string (equivalente a strlen(line))
     leaq    line(%rip), %rdi
-    movl    $256, %esi
-    movq    stdin(%rip), %rdx
-    call    fgets@PLT
+    call    strlen@PLT          # %rax = len
+    movq    %rax, %rdx          # %rdx = end (len)
 
-    testq   %rax, %rax
-    jz      .L_main_end
-
-    leaq    line(%rip), %rdi
-    call    strlen@PLT
-    movl    %eax, %r12d
-
-.L_strip_newline:
-    testl   %r12d, %r12d
-    jle     .L_check_empty
-
-    leaq    line(%rip), %rbx
-    movl    %r12d, %ecx
-    decl    %ecx
-    movsbl  (%rbx, %rcx, 1), %edx
-
-    cmpl    $10, %edx
-    je      .L_do_strip
-    cmpl    $13, %edx
-    je      .L_do_strip
-    jmp     .L_check_empty
-
-.L_do_strip:
-    decl    %r12d
-    movb    $0, (%rbx, %r12, 1)
-    jmp     .L_strip_newline
-
-.L_check_empty:
-    testl   %r12d, %r12d
-    jz      .L_main_loop
-
-    # result = eval_expr(line, 0, len)
-    leaq    line(%rip), %rdi
-    movl    $0, %esi
-    movl    %r12d, %edx
-    call    eval_expr
+    # Chama eval_expr(line, 0, len)
+    leaq    line(%rip), %rdi    # %rdi = line
+    xorl    %esi, %esi          # %rsi = start = 0
+    # %rdx ja eh len
+    call    eval_expr           # %rax = result
 
     # printf("%ld\n", result)
     leaq    fmt_out(%rip), %rdi
     movq    %rax, %rsi
-    movl    $0, %eax
+    xorl    %eax, %eax
     call    printf@PLT
 
-    jmp     .L_main_loop
+    jmp     .L_main_loop        # Volta para ler a proxima linha
 
 .L_main_end:
-    movl    $0, %eax
-    popq    %rbp
+    movl    $0, %eax            # return 0
+    leave
     ret
