@@ -4,6 +4,7 @@ fmt_out: .string "%ld\n"
 
     .section .bss
     .lcomm line, 256
+    .lcomm vars, 208            # Array de 26 longs (26 * 8 = 208 bytes)
 
     .section .text
     .global main
@@ -15,24 +16,35 @@ read_term:
     pushq   %rbp
     movq    %rsp, %rbp
     
-    xorq    %rax, %rax          # num = 0
-    movslq  (%rsi), %rcx        # %rcx = *pos
+    xorq    %rax, %rax
+    movslq  (%rsi), %rcx
     
-    # Se chegou no final, sai
     cmpq    %rdx, %rcx
     jge     .L_read_term_end
     
-    # Pega o primeiro caractere
     movzbq  (%rdi, %rcx), %r8
     
-    # Verifica se eh um digito
+    # NOVIDADE DA ETAPA 3: Verifica se é uma letra de 'a' a 'z'
+    cmpb    $'a', %r8b
+    jl      .L_check_digit
+    cmpb    $'z', %r8b
+    jg      .L_check_digit
+
+    # É uma letra!
+    subq    $'a', %r8           # Transforma ASCII no índice (0 a 25)
+    leaq    vars(%rip), %r9     # Pega o endereço base de 'vars'
+    movq    (%r9, %r8, 8), %rax # rax = vars[indice * 8]
+    incq    %rcx                # (*pos)++
+    jmp     .L_read_term_end
+
+.L_check_digit:
+    # Verifica se eh um digito ('0' a '9')
     cmpb    $'0', %r8b
     jl      .L_not_digit
     cmpb    $'9', %r8b
     jg      .L_not_digit
 
 .L_read_term_loop:
-    # Loop de conversao dos digitos
     cmpq    %rdx, %rcx
     jge     .L_read_term_end
 
@@ -46,17 +58,15 @@ read_term:
     subb    $'0', %r8b
     addq    %r8, %rax
     
-    incq    %rcx                # (*pos)++
+    incq    %rcx
     jmp     .L_read_term_loop
 
 .L_not_digit:
-    # Se nao for digito (ainda nao temos letras da Etapa 3).
-    # Comportamento do C: apenas ignora o char invalido e avanca pos.
     incq    %rcx
-    xorq    %rax, %rax          # Retorna 0
+    xorq    %rax, %rax
 
 .L_read_term_end:
-    movl    %ecx, (%rsi)        # Salva o *pos atualizado
+    movl    %ecx, (%rsi)
     popq    %rbp
     ret
 
@@ -68,72 +78,91 @@ eval_expr:
     pushq   %rbp
     movq    %rsp, %rbp
     
-    # Precisamos proteger os registradores que guardam nossos estados vitais!
-    pushq   %r12        # %r12 = result
-    pushq   %r13        # %r13 = sign
-    pushq   %r14        # %r14 = line (ponteiro para string)
-    pushq   %r15        # %r15 = end  (tamanho da string)
-    
-    # Aloca 16 bytes. -36(%rbp) sera o endereco de memoria da nossa variavel 'pos'
-    subq    $16, %rsp   
+    pushq   %r12
+    pushq   %r13
+    pushq   %r14
+    pushq   %r15
+    subq    $16, %rsp
 
-    # Guarda os argumentos recebidos para não perdê-los
-    movq    %rdi, %r14          # Guarda line em %r14
-    movq    %rdx, %r15          # Guarda end em %r15
-    movl    %esi, -36(%rbp)     # Inicia 'pos' com valor de 'start'
+    movq    %rdi, %r14
+    movq    %rdx, %r15
+    movl    %esi, -36(%rbp)
 
-    xorq    %r12, %r12          # result = 0
-    movq    $1, %r13            # sign = 1
+    xorq    %r12, %r12
+    movq    $1, %r13
 
 .L_eval_loop:
-    # while (pos < end)
-    movslq  -36(%rbp), %rcx     # Le a variavel 'pos' da pilha
-    cmpq    %r15, %rcx
-    jge     .L_eval_end         # Se pos >= end, quebra o loop principal
-
-    # Chama read_term(line, &pos, end)
-    movq    %r14, %rdi          # Arg 1: line
-    leaq    -36(%rbp), %rsi     # Arg 2: &pos
-    movq    %r15, %rdx          # Arg 3: end
-    call    read_term           # Retorno vai para %rax (term)
-
-    # result += sign * term
-    imulq   %r13, %rax          # Multiplica term por sign (1 ou -1)
-    addq    %rax, %r12          # Adiciona ao result geral
-
-    # if (pos < end)
     movslq  -36(%rbp), %rcx
     cmpq    %r15, %rcx
-    jge     .L_eval_loop        # Voltar pro inicio (e na verificação vai sair)
+    jge     .L_eval_end
 
-    # Identificando o proximo caractere para o proximo ciclo: line[pos]
-    movzbq  (%r14, %rcx), %r8   # %r8 = line[pos]
+    movq    %r14, %rdi
+    leaq    -36(%rbp), %rsi
+    movq    %r15, %rdx
+    call    read_term
 
-    # Verifica '+'
+    imulq   %r13, %rax
+    addq    %rax, %r12
+
+    movslq  -36(%rbp), %rcx
+    cmpq    %r15, %rcx
+    jge     .L_eval_loop
+
+    movzbq  (%r14, %rcx), %r8
+
     cmpb    $'+', %r8b
     jne     .L_check_minus
-    movq    $1, %r13            # sign = 1
-    incl    -36(%rbp)           # pos++
+    movq    $1, %r13
+    incl    -36(%rbp)
     jmp     .L_eval_loop
 
 .L_check_minus:
-    # Verifica '-'
     cmpb    $'-', %r8b
-    jne     .L_eval_loop        # Se for outro char (espaco ou sujeira), so ignora e volta
-    movq    $-1, %r13           # sign = -1
-    incl    -36(%rbp)           # pos++
+    jne     .L_eval_loop
+    movq    $-1, %r13
+    incl    -36(%rbp)
     jmp     .L_eval_loop
 
 .L_eval_end:
-    movq    %r12, %rax          # Prepara o retorno (result)
-
-    # Restaura o espaco na pilha e registradores (IMPORTANTE: ordem reversa do push)
+    movq    %r12, %rax
     addq    $16, %rsp
     popq    %r15
     popq    %r14
     popq    %r13
     popq    %r12
-    leave                       # Destroi o frame
+    leave
+    ret
+
+
+# ========================================================
+# void handle_var_assignment(const char *line, int len)
+# ========================================================
+handle_var_assignment:
+    pushq   %rbp
+    movq    %rsp, %rbp
+    
+    # Salvamos o rbx porque usaremos ele para manter o ponteiro 'line'.
+    pushq   %rbx
+    subq    $8, %rsp            # Alinhamento de pilha para 16 bytes
+
+    movq    %rdi, %rbx          # Guarda line em %rbx
+    
+    # Prepara call eval_expr(line, 2, len)
+    movq    %rsi, %rdx          # rdx = len
+    movq    %rbx, %rdi          # rdi = line
+    movl    $2, %esi            # rsi = start = 2
+    call    eval_expr
+
+    # --- salvar resultado na variável ---
+    movzbq  (%rbx), %rcx        # rcx = line[0]
+    subq    $'a', %rcx          # índice 0..25
+
+    leaq    vars(%rip), %r8
+    movq    %rax, (%r8, %rcx, 8)
+
+    addq    $8, %rsp
+    popq    %rbx
+    leave
     ret
 
 
@@ -156,10 +185,27 @@ main:
 
     leaq    line(%rip), %rdi
     call    strlen@PLT
-    movq    %rax, %rdx
+    movq    %rax, %rdx          # %rdx = len
+
+    # Verifica se a linha eh maior que 1 e se o segundo caractere é '='
+    cmpq    $1, %rdx
+    jle     .L_eval_mode        # Se len <= 1, com certeza é conta simples
 
     leaq    line(%rip), %rdi
+    cmpb    $'=', 1(%rdi)       # Verifica se line[1] == '='
+    jne     .L_eval_mode
+
+    # MODO ATRIBUIÇÃO (ex: a=10)
+    movq    %rdi, %rdi          # Arg 1: line (redundante mas ilustrativo)
+    movq    %rdx, %rsi          # Arg 2: len
+    call    handle_var_assignment
+    jmp     .L_main_loop        # Volta sem dar printf
+
+.L_eval_mode:
+    # MODO CÁLCULO (ex: a+10)
+    leaq    line(%rip), %rdi
     xorl    %esi, %esi
+    # %rdx ja tem len do strlen
     call    eval_expr
 
     leaq    fmt_out(%rip), %rdi
