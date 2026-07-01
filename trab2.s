@@ -1,8 +1,8 @@
 .section .rodata
-fmt_in:  .string "%255s"
-fmt_out: .string "%ld\n"
+    fmt_in:  .string "%255s"
+    fmt_out: .string "%ld\n"
 
-    .section .bss
+.section .bss
     .lcomm line, 256
     .lcomm vars, 208
     
@@ -11,8 +11,8 @@ fmt_out: .string "%ld\n"
     .lcomm func_body, 6656       # Array 2D: 26 * 256 bytes (6656 bytes)
     .lcomm func_defined, 26      # Booleano (1 byte cada) indicando se existe
 
-    .section .text
-    .global main
+.section .text
+.global main
 
 # ========================================================
 # bool contains_equal(const char *line, int len)
@@ -229,10 +229,10 @@ read_term:
 
     # 6. AVALIA O CORPO: result = eval_expr(body, 0, strlen(body))
     movq    %r14, %rdi
-    call    strlen@PLT
+    call    strlen
     movq    %rax, %rdx          # end = strlen
     movq    %r14, %rdi          # line = body
-    xorl    %esi, %esi          # start = 0
+    xor    %esi, %esi          # start = 0
     call    eval_expr
     movq    %rax, %r15          # r15 = result (resposta da função)
 
@@ -338,7 +338,6 @@ eval_expr:
 
 # ========================================================
 # void handle_var_assignment(const char *line, int len)
-# (VERSÃO CORRIGIDA PELO USUÁRIO!)
 # ========================================================
 handle_var_assignment:
     pushq   %rbp
@@ -381,14 +380,14 @@ main:
 .L_main_loop:
     leaq    fmt_in(%rip), %rdi
     leaq    line(%rip), %rsi
-    xorl    %eax, %eax
-    call    scanf@PLT
+    xor    %eax, %eax
+    call    scanf
 
     cmpl    $1, %eax
     jne     .L_main_end
 
     leaq    line(%rip), %rdi
-    call    strlen@PLT
+    call    strlen
     movq    %rax, %r12          # r12 = len (salvo de forma segura!)
 
     # if (len <= 1)
@@ -430,14 +429,14 @@ main:
 .L_eval_mode:
     # Modo Cálculo
     leaq    line(%rip), %rdi
-    xorl    %esi, %esi
+    xor    %esi, %esi
     movq    %r12, %rdx
     call    eval_expr
 
     leaq    fmt_out(%rip), %rdi
     movq    %rax, %rsi
-    xorl    %eax, %eax
-    call    printf@PLT
+    xor    %eax, %eax
+    call    printf
 
     jmp     .L_main_loop
 
